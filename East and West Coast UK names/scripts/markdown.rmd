@@ -1,0 +1,624 @@
+---
+title: "Data Science Challenge - Walkthrough"
+author: "Oliver Frost"
+date: "July 2, 2017"
+output: html_document
+---
+
+```{r prep , echo=FALSE, include = FALSE, cache = TRUE}
+library(data.table)
+library(sqldf)
+library(dplyr)
+
+ufn_CountDuplicates <- function(x){
+  return(nrow(x) - nrow(unique(x))) ## First column only for performance.
+}
+
+## Specify the country codes you are interested in bringing through analyse and place on the dashboard.
+input_colonyCountries <- c("gb","us","au","in") 
+
+input_eastCoastStates <- c("Maine", "New Hampshire", "Massachusetts", "Rhode Island", 
+                     "Connecticut", "New York", "New Jersey","Delaware", "Maryland", 
+                     "Virginia", "North Carolina", "South Carolina", "Georgia", "Florida")
+
+input_westCoastStates <- c("California","Oregon","Washington","Alaska","Hawaii")
+
+```
+
+## 0. Preliminaries {.tabset .tabset-fade .tabset-pills}
+### a. Hypothesis
+
+Prove or disprove:
+
+> “Since the UK was one of the main countries that colonised the USA, and the UK is on the east side of the USA there are more towns/cities with UK names on the east coast of the US rather than the west coast.”
+
+
+### b. Main aims
+
+- Given the limited time frame of the task, I wanted to focus on building a working model of the data that could be queried in more detail later, while still providing the answers to some of the more obvious questions that could be asked of the data, **while attempting to stay within the scope as much as possible.** 
+- To ensure that readable documentation was produced that was easy to follow along and test.
+- I wanted to ensure that the project was reproducible as much as possible.
+
+### c. Questions
+
+However, from my initial impressions of the data I did have a few questions I wanted to answer prior to building something more complex:
+
+* Do countries who were a part of the British colony (US, India, Australia) indeed share place names with the UK?
+* If that's true, will we see more shared place names on the east coast than the west coast?
+* If a difference exists, is it significant?
+* Can the matching place names be traced to specific regions of the UK?
+
+
+### d. Definitions
+
+The East Coast states with coastal access to the Atlantic Ocean include:
+
+- Maine 
+- New Hampshire 
+- Massachusetts 
+- Rhode Island 
+- Connecticut 
+- New York 
+- New Jersey 
+- Delaware 
+- Maryland 
+- Virginia 
+- North Carolina 
+- South Carolina 
+- Georgia 
+- Florida
+
+Similarly, the West Coast states with coastal access to the Pacific Ocean include:
+
+- California
+- Oregon
+- Washington
+- Alaska
+- Hawaii
+
+
+### e. Notes
+
+Taken from the *readme* at <https://www.maxmind.com/en/free-world-cities-database>:
+
+> Please note: The database is no longer updated or maintained. This database contains duplicate and incorrect entries. It is provided as-is, and we are unable to provide support for it. For a cleaner database, try GeoNames, but they may lack some cities included in our data."
+
+This was an important consideration when performing ceratin types of data manipulations and analyses.
+
+
+### f. Tools
+
+I used a combination of R for the analysis and documentation and Power BI for the bulk of the data visualisation:
+
+* The data was too large in it's original form to be loaded directly into Power BI or Excel - **R can load the data into memory** and profile it quickly.
+* R and R Studio provides functionality to write **markdown** documents, enabling me to effectively write documentation as I go.
+* I can import useful open-source libraries exist for various functions like **running SQL queries** on the data, or for importing data directly into memory as a table from a URL.
+* **Power BI is a free, powerful visualisation tool** which has R components for loading, transforming and plotting data (should I need them.) 
+
+
+
+## 1. Data preparation {.tabset .tabset-fade .tabset-pills}
+### a. Profiling
+
+It is worth profiling data to forsee any potential issues that may cause time to be wasted when loading or analysing a particular data set, even if flat files appear to be regular and clean.
+
+These are some of the technical details about the file found using **Notepad++**:
+
+* The original data file was encoded using ANSI encoding.
+* The file contained **3173960 rows** including a header and an empty line at the end.
+* The header suggests that there are **7 columns** in total.
+* The delimiter was a comma and there are no quoted identifiers.
+
+A preview of the main data set:
+
+```{r input_cities, echo = FALSE, cache = TRUE}
+input_cities <- "data/worldcitiespop.txt"
+# citiesData <- data.table::fread("data/Cities_ProcessedOutput.csv")
+cat(
+    paste0(
+        readLines(con = file(input_cities), n = 10), collapse = "\r\n"
+    )
+)
+```
+
+
+
+### b. Loading
+
+The data was read in from a local file using the **data.table** library, which also imports useful functionality for data manipulation as well as the fast loading of large tables into memory:
+
+```
+citiesData <- data.table::fread(input_cities)
+```
+
+```{r data, echo=FALSE, cache = TRUE, include = FALSE}
+citiesData <- data.table::fread(input_cities)
+```
+
+The same library provides extra flexibility by allowing the user to import data straight into memory from a URL without having to download the data locally, which was done for the region code metadata:  
+
+```{r regions, cache = TRUE}
+codes <- "http://www.maxmind.com/download/geoip/misc/region_codes.csv"
+regions <- data.table::fread(codes, col.names = c("Country","Region","State"))
+
+head(regions)
+```
+
+The *str* and *summary* base functions were used to reconcile the row count between source and target while also providing some useful insights into the dataset as a whole.
+
+```{r str}
+str(citiesData)
+summary(data.frame(citiesData))
+```
+
+Some of the more notable insights include:
+
+- **There are 234 unique country codes in the data.** We obviously do not need all of these, so we can assume that the dataset will be significantly smaller once we have filtered out the countries we need.
+- **Population is sparsely populated.** With 3125978 NA values, it seems unlikely that we will be able to use this column effectively for anything interesting. This will be confirmed once the countries we're interested in are filtered.
+- **The accuracy/reliability of the data is questionable.** The queries below suggest that Tokyo's population is approximately 31 million people, whereas more recent data suggests the population is closer to 37.8 million. Similarly, these data also indicate that New Delhi has a population of approximately 10.92 million, but in 2011 it was closer to 21.75 million.
+
+``` {r large}
+dplyr::filter(citiesData, Population > 10000000)
+```
+
+- **Duplicates** - you can also see that some rows contain multiple entries. This could pose a problem when performing joins later on. The data also includes 311 exact duplicates.
+
+```{r dupe1}
+ufn_CountDuplicates(citiesData) # see scripts/functions.r to see how this works.
+``` 
+
+The main concern is not the accuracy of the population column, but it is the not **knowing when the data was last maintained**. It is possible that some cities have changed their names, or that this data was last updated many years ago and contains errors or **missing cities**. 
+
+This data will not be perfect, and we can assume that the majority of cities still exist now as they did when the last release was published. There will be some things we can do to clean this data up, but we should press on.
+
+**Fun fact:** 
+These are the cities with populations of 10 or less:
+
+``` {r small}
+dplyr::filter(citiesData, Population <= 10)
+```
+
+
+
+## 2. Filtering and transformations. {.tabset .tabset-fade .tabset-pills}
+### a. Filtering
+
+Filter out the countries we're not interested in:
+
+```{r firstfilt, cache = TRUE}
+## Specify the country codes you are interested in bringing through to analyse.
+input_colonyCountries <- c("gb","us","au","in") 
+
+## Filter the data table.
+citiesData <- citiesData[Country %in% input_colonyCountries]
+```
+
+How many *exact* duplicates exist at this point?
+
+```{r dupe2}
+ufn_CountDuplicates(citiesData)
+```
+
+Because R has a wide range of libraries available for analysis, it is entirely possible to use SQL queries inside your R scripts. The **sqldf** permits you to use a form of SQL (SQLite) to query data. This approach is useful because: 
+
+- It can combine a number of analytical steps into one query.
+- SQL is expressive, so users of SQL can follow what you are trying to do.
+- The sqldf library performs well. If we were to use this code in a serious production setting we would benefit from using only R code, but for the purpose of quick ad-hoc analysis it is fine to use.
+
+Let's investigate the dupes:
+
+```{r sql1, echo = FALSE}
+## Probe the dupes on a reduced number of columns.
+sqldf::sqldf("SELECT Country, City, AccentCity, Region, count(1) as Freq
+      FROM citiesData
+      GROUP BY Country, City, AccentCity, Region
+      HAVING count(1) > 1") 
+```
+
+Neither of these regions are on the east or west coasts, so it should not affect the next stages of the analysis too drastically, if at all.
+
+### b. Wrangling
+
+Let's merge the results of **citiesData** with the **stateLookup** data table that was created in ```scripts/metadata.R``` : 
+
+```{r merge, cache = TRUE}
+## Create final data table.
+stateLookup <- data.table(
+  Country =  tolower(regions$Country),
+  Region = regions$Region,
+  State = regions$State
+)
+
+citiesData <- merge(
+  x = unique(citiesData), y = stateLookup, # returns 5 states, which matches the length of westCoastStates
+  by = c("Country","Region"), all.x = TRUE
+)
+```
+
+No more duplicate rows exist at this point:
+```{r dupe3}
+ufn_CountDuplicates(citiesData)
+```
+
+The data currently looks like so:
+
+```{r previewCitiesData}
+head(citiesData)
+```
+
+One final join to the **EastwestLookup** created in the ```inputs.r``` file:
+
+```{r sql, cache = TRUE, echo = FALSE}
+## Create a lookup data table from the result.
+input_EastWestLookup <- data.table::data.table(
+  State = c(input_eastCoastStates, input_westCoastStates),
+  EastWest = c(rep("East", length(input_eastCoastStates)), rep("West", length(input_westCoastStates)))
+)
+
+## Perform join on data enrichment table.
+citiesDataFull <- sqldf::sqldf("
+      SELECT
+          c.Country as Country,
+          c.City, c.AccentCity, c.Longitude, c.Latitude,
+          COALESCE(c.State, c.Country || c.Region) as Region,
+          COALESCE(ewl.EastWest, 'Other') as EastWestFlag
+      FROM
+          citiesData c
+      LEFT OUTER JOIN
+          input_EastWestLookup ewl
+      ON
+          c.State = ewl.State
+      AND
+          c.[Country] = 'us'
+      ")
+
+```
+
+The final processed file for analysis looks like so:
+
+```{r head2}
+str(citiesDataFull)
+```
+
+
+### c. Results
+
+This dataset powers the Shiny dashboard. The full results set is stored under the ```data``` directory as ```data/Cities_ProcessedOutput.csv``` :
+
+    write.table(citiesDataFull, "data/Cities_ProcessedOutput.csv", row.names = FALSE, sep = ";")
+    
+
+## 3. Analysis {.tabset .tabset-fade .tabset-pills}
+### a. Does the UK share place names with Australia? 
+
+Let's begin gaining some of the basic insights. **Yes**, Australia does indeed share some place names:
+
+```{r presql3, echo = FALSE}
+aus <- sqldf::sqldf("
+  SELECT
+      AccentCity, 
+      Region,
+      Longitude, Latitude
+  FROM 
+      citiesDataFull aus
+  WHERE
+    City IN 
+      (SELECT DISTINCT City FROM citiesDataFull WHERE Country = 'gb')
+  AND
+    Country = 'au'")
+
+aus[1:20,];
+```
+The number of towns with UK place names:
+```{r sql3a}
+nrow(aus)
+```
+As a proportion of all of the distinct towns and cities in Australia:
+```{r sql3b}
+totalCities <- nrow(citiesDataFull[citiesDataFull$Country == 'au',])
+
+nrow(aus) / totalCities * 100
+```
+
+I find it fairly interesting that *nearly 10% of Australian places share a name with a place in the UK*.
+
+**Note: **I decided to match on the City column rather than the AccentCity column, as the City column has standardised the names.
+
+However, I did notice something about the data when querying the Australia dataset. Take the query below for example, where I want to try and calculate the number of cities each Australian town shares in the UK: 
+
+```{r sql3, echo = FALSE}
+aus <- sqldf::sqldf("
+SELECT
+  City, AusRegion, count(1) as CountSharedUKCities
+FROM
+ (
+  SELECT 
+      aus.City, 
+      aus.Region as AusRegion, uk.Region as UkRegion 
+  FROM 
+      (SELECT DISTINCT City, Region FROM citiesDataFull WHERE Country = 'au') aus 
+  INNER JOIN 
+      (SELECT DISTINCT City, Region FROM citiesDataFull WHERE Country = 'gb') uk 
+  ON 
+      aus.City = uk.City 
+ ) a
+GROUP BY
+  City, AusRegion;
+")
+
+aus[1:20,]
+```
+
+This highlights an interesting feature of our original data set. In the original data file, there are indeed 16 occurrences of a city/town/village called **Sutton** in the UK, however the accuracy of these entries is again questionable: 
+
+```{r sutton}
+citiesData[citiesData$AccentCity == "Sutton" & citiesData$Country == "gb",]
+```
+
+Some manual Google searches highlight some of the inaccuracies by showing us the full and proper names of these towns:
+
+```
+##  1:              Cambridgeshire - Sutton
+##  2:                  Derbyshire - Sutton-on-the-Hill
+##  3:                   Doncaster - Sutton
+##  4:    East Riding of Yorkshire - Full Sutton
+##  5:               Herefordshire - Sutton St Nicholas
+##  6: Kingston upon Hull, City of - Sutton-on-Hull
+##  7:                     Norfolk - Sutton
+##  8:             North Yorkshire - Sutton-in-Craven
+##  9:             Nottinghamshire - Sutton-in-Ashfield
+## 10:                Peterborough - Sutton // Possible dupe of Cambridgeshire
+## 11:             Southend-on-Sea - Sutton
+## 12:                     Suffolk - Sutton
+## 13:                      Sutton - Sutton // Possibly in London
+## 14:                Warwickshire - Sutton Coldfield
+## 15:        Central Bedfordshire - Sutton
+## 16:   Cheshire West and Chester - Sutton Weaver
+```
+
+This is fairly common, as Sutton has origins from centuries ago. From Wikipedia:
+
+> Sutton is an English-language surname of England and Ireland. One origin is from Anglo-Saxon where it is derived from sudh, suth, or suð, and tun referring to the generic placename "Southtown".
+
+We can also see from the results that Kingston, Preston, Weston, Broughton and Middleton may also share a degree of variation according to their specific locations in the UK.
+
+This raises the question on what we should classify as a *match* in terms of place names. Does **Sutton-in-Ashfield in Nottinghamshire** match **Sutton in New South Wales in Australia**? Ideally, we would perform further data enrichment on the data we have, or simply replace the current dataset with a more accurate and better maintained dataset (which probably would give us a more accurate answer.)
+
+** In this instance, I continued to analyse the data as is.** The observation that Sutton in New South Wales in Australia is validated since there exists at least one town/city/village in the UK called Sutton as well, but take this into consideration when making our final conclusions.
+
+
+
+### b. Does the UK share place names with India?
+
+Not as many, but there are some shared names!
+
+```{r sql4, echo = FALSE}
+india <- sqldf::sqldf("
+  SELECT
+      AccentCity, 
+      Region,
+      Longitude, Latitude
+  FROM 
+      citiesDataFull ind
+  WHERE
+    ind.City IN 
+      (SELECT DISTINCT City FROM citiesDataFull WHERE Country = 'gb')
+  AND
+    ind.Country = 'in'")
+
+india[1:20,];
+```
+The number of places with UK place names:
+```{r sql4a}
+nrow(india)
+```
+As a proportion of all of the towns in India:
+``` {r sql4b}
+totalCities <- nrow(citiesDataFull[citiesDataFull$Country == 'in',])
+
+nrow(india) / totalCities * 100
+```
+
+### c. Does the UK share place names with the **east coast** of the US?
+
+You betcha:
+
+```{r sql5, cache = TRUE, echo = FALSE}
+muricaEast <- sqldf::sqldf("
+  SELECT
+      AccentCity, 
+      Region,
+      Longitude, Latitude
+  FROM 
+      citiesDataFull usa
+  WHERE
+    usa.City IN 
+      (SELECT DISTINCT City FROM citiesDataFull WHERE Country = 'gb')
+  AND
+    usa.Country = 'us' AND usa.EastWestFlag = 'East'")
+
+muricaEast[1:20,];
+
+```
+The number of towns with UK place names:
+```{r sql5a}
+nrow(muricaEast)
+```
+
+As a proportion of all of the distinct towns and cities on the east coast:
+```{r sql5b}
+totalCities <- nrow(citiesDataFull[citiesDataFull$Country == 'us' & citiesDataFull$EastWestFlag == "East",])
+
+nrow(muricaEast) / totalCities * 100
+```
+
+As a proportion of all US cities:
+```{r sql5c}
+nrow(muricaEast) / nrow(citiesDataFull[citiesDataFull$Country == 'us',])
+```
+
+### d. Does the UK share place names with the **west** coast of the US?
+
+Conversely, we do not see a smaller number of matching town/city names on the west coast - in fact, we see considerably more on the west coast than we do the east coast.
+
+```{r sql6, cache = TRUE, echo = FALSE}
+muricaWest <- sqldf::sqldf("
+  SELECT
+      AccentCity, 
+      Region,
+      Longitude, Latitude
+  FROM 
+      citiesDataFull usa
+  WHERE
+    usa.City IN 
+      (SELECT DISTINCT City FROM citiesDataFull WHERE Country = 'gb')
+  AND
+    usa.Country = 'us' AND usa.EastWestFlag = 'West'")
+
+muricaWest[1:20,];
+```
+
+Number of distinct towns:
+```{r sql6a}
+nrow(muricaWest)
+```
+
+As a proportion of all of the distinct towns and cities on the west coast:
+```{r sql6b}
+totalCities <- nrow(citiesDataFull[citiesDataFull$Country == 'us' & citiesDataFull$EastWestFlag == "West",])
+
+nrow(muricaWest) / totalCities * 100
+```
+As a proportion of all US cities:
+```{r sql6c}
+nrow(muricaWest) / nrow(citiesDataFull[citiesDataFull$Country == 'us',])
+```
+
+So while the proportion of places in the US with UK names is roughly the same between the east and west coasts (only ~0.3% difference) there is a substantial difference in the number of places with UK names between the east and west coasts (2761 on the East Coast compared to 576 on the West.)
+
+**Note** According to the 2010 Census, the East Coast has a population of approximately 112 million compared to the 48 million inhabitants on the West Coast.
+
+### e. Which US states contain the most places with UK names?
+
+For the east coast:
+
+```{r table2}
+df <- data.frame(table(muricaEast$Region))
+df[order(df$Freq, decreasing = TRUE),]
+```
+
+This finding is supported by the fact that Virginia was one of the first colonies to be founded when the British first came to America, starting at Jamestown.
+
+The west coast:
+
+```{r table1}
+data.frame(table(muricaWest$Region))
+```
+
+It seems that Hawaii has no shared names with the UK!
+
+### f. Which UK regions have the most places shared with the US, on the east coast or the west coast?
+
+```{r ukcount, cache = TRUE, echo = FALSE}
+
+ukCounts <- sqldf::sqldf("
+  SELECT
+      uk.Region as UkRegion,
+      usa.EastWestFlag as EastWestFlag,
+      count(1) as Freq
+  FROM 
+      (SELECT AccentCity, Region, EastWestFlag FROM citiesDataFull WHERE Country = 'us' AND EastWestFlag != 'Other') usa 
+  INNER JOIN 
+      (SELECT AccentCity, Region FROM citiesDataFull WHERE Country = 'gb') uk 
+  ON 
+      usa.AccentCity = uk.AccentCity 
+ GROUP BY
+      'United Kingdom', uk.Region, usa.EastWestFlag
+ ORDER BY
+    Freq DESC")
+
+```
+Top 10 English counties with the most shared place names from the **East Coast**:
+``` {r top10a}
+dplyr::filter(ukCounts, EastWestFlag == "East" & Freq > 10)[1:10,]
+```
+
+Top 10 English counties with the most shared place names from the **East Coast**:
+``` {r top10b}
+dplyr::filter(ukCounts, EastWestFlag == "West" & Freq > 10)[1:10,]
+```
+
+## 4. Power BI {.tabset .tabset-fade .tabset-pills}
+### a. Importing R code
+
+One of the benefits of using more recent versions of Power BI is being able to use the R integration tools available to you. For example, I can create datasets within a report by simply copying and pasting the R (and SQL) queries we've written so far.
+
+![Power BI will determine which variables are tables and incorporate them into your Power BI report file.](images/eg_input.png)
+
+The script can be concatenated together and pasted in the **R script** option of the **Get Data tab**.
+
+```
+#### Install relevant libraries beforehand and load them.
+library(data.table)
+library(dplyr)
+library(sqldf) # install.packages(c("sqldf","dplyr","data.table"))
+
+# Import the data.
+citiesDataFull <- fread("C:\\OF\\DLG\\R Project\\data\\Cities_ProcessedOutput.csv")
+
+# Australia
+aus <- sqldf::sqldf("
+  SELECT
+      AccentCity, 
+      Region,
+      Longitude, Latitude
+  FROM 
+      citiesDataFull aus
+  WHERE
+    AccentCity IN 
+      (SELECT DISTINCT AccentCity FROM citiesDataFull WHERE Country = 'gb')
+  AND
+    Country = 'au'")
+
+# India
+india <- sqldf::sqldf("
+  SELECT
+      AccentCity, 
+      Region,
+      Longitude, Latitude
+  FROM 
+      citiesDataFull ind
+  WHERE
+    ind.AccentCity IN 
+      (SELECT DISTINCT AccentCity FROM citiesDataFull WHERE Country = 'gb')
+  AND
+    ind.Country = 'in'")
+####  ....
+```
+### b. The Power BI report.
+I have attached a Power BI file with Power BI reports attached. **You will need the latest version of Power BI Desktop in order to view it.**
+
+![A preview of a Power BI report.](images/eg_dashboard.png)
+
+## 5. Conclusions and notes. {.tabset .tabset-fade .tabset-pills}
+### a. Conclusion 
+**That the hypothesis is true** - there are indeed more places with UK names on the East Coast than there are on the West Coast.
+
+### b. Improvements.
+
+Given a longer time frame to work in, there are a few extra hypotheses I would have liked to have investigated:
+
+- **How did the number of shared names change over time?** With additional data (either scraped from an external source or from a readymade dataset) could we map the colonisation of the East and West coasts and observe the population of cities over years?
+- **Greater accuracy in the data** Given some extra time to research, I would improve this piece by sourcing a more accurate list of UK cities, perhaps from the Office of National Statistics or from Ordanance Survey, to more accurately measure the number of exact matches of UK names to US names.
+- **Fuzzy matching** It would be interesting to introduce Levenshtein distances into future analyses to try and match on similar sounding names to provide a workaround for name variations (such as Sutton-on-the-Hill and Sutton-on-Hull)
+- **Compensating for the multiple longitude/latitude values** I would have liked to have incorporated a function from a Stack Overflow question I answered a while ago, which aggregates long/lat values taking into account the curviture of the Earth. Alas, the code is below::
+
+## 6. References {.tabset .tabset-fade .tabset-pills}
+
+Main dataset: <http://download.maxmind.com/download/worldcities/worldcitiespop.txt.gz>
+
+Region codes for the main dataset: <http://www.maxmind.com/download/geoip/misc/region_codes.csv>
+
+Reference for east and west coast definitions: <https://en.wikipedia.org/wiki/East_Coast_of_the_United_States>
+
+<https://en.wikipedia.org/wiki/West_Coast_of_the_United_States>
