@@ -6,13 +6,12 @@ output: html_document
 ---
 
 
-
-## 0. Preliminaries {.tabset .tabset-fade .tabset-pills}
+## 0. Preliminaries 
 ### a. Hypothesis
 
 Prove or disprove:
 
-> “Since the UK was one of the main countries that colonised the USA, and the UK is on the east side of the USA there are more towns/cities with UK names on the east coast of the US rather than the west coast.”
+> Since the UK was one of the main countries that colonised the USA, and the UK is on the east side of the USA there are more towns/cities with UK names on the east coast of the US rather than the west coast.
 
 
 ### b. Main aims
@@ -79,7 +78,7 @@ I used a combination of R for the analysis and documentation and Power BI for th
 
 
 
-## 1. Data preparation {.tabset .tabset-fade .tabset-pills}
+## 1. Data preparation
 ### a. Profiling
 
 It is worth profiling data to forsee any potential issues that may cause time to be wasted when loading or analysing a particular data set, even if flat files appear to be regular and clean.
@@ -146,7 +145,7 @@ str(citiesData)
 ## Classes 'data.table' and 'data.frame':	3173958 obs. of  7 variables:
 ##  $ Country   : chr  "ad" "ad" "ad" "ad" ...
 ##  $ City      : chr  "aixas" "aixirivali" "aixirivall" "aixirvall" ...
-##  $ AccentCity: chr  "Aix�s" "Aixirivali" "Aixirivall" "Aixirvall" ...
+##  $ AccentCity: chr  "Aixàs" "Aixirivali" "Aixirivall" "Aixirvall" ...
 ##  $ Region    : chr  "06" "06" "06" "06" ...
 ##  $ Population: int  NA NA NA NA NA NA 20430 NA NA NA ...
 ##  $ Latitude  : num  42.5 42.5 42.5 42.5 42.5 ...
@@ -190,7 +189,7 @@ dplyr::filter(citiesData, Population > 10000000)
 
 ```
 ##    Country      City AccentCity Region Population  Latitude Longitude
-## 1       br sao paulo  S�o Paulo     27   10021437 -23.47329 -46.66580
+## 1       br sao paulo  São Paulo     27   10021437 -23.47329 -46.66580
 ## 2       cn  shanghai   Shanghai     23   14608512  31.04556 121.39972
 ## 3       in    bombay     Bombay     16   12692717  18.97500  72.82583
 ## 4       in     delhi      Delhi     07   10928270  28.66667  77.21667
@@ -238,7 +237,7 @@ dplyr::filter(citiesData, Population <= 10)
 
 
 
-## 2. Filtering and transformations. {.tabset .tabset-fade .tabset-pills}
+## 2. Filtering and transformations.F{
 ### a. Filtering
 
 Filter out the countries we're not interested in:
@@ -375,7 +374,7 @@ This dataset powers the Shiny dashboard. The full results set is stored under th
     write.table(citiesDataFull, "data/Cities_ProcessedOutput.csv", row.names = FALSE, sep = ";")
     
 
-## 3. Analysis {.tabset .tabset-fade .tabset-pills}
+## 3. Analysis
 ### a. Does the UK share place names with Australia? 
 
 Let's begin gaining some of the basic insights. **Yes**, Australia does indeed share some place names:
@@ -523,7 +522,7 @@ Some manual Google searches highlight some of the inaccuracies by showing us the
 
 This is fairly common, as Sutton has origins from centuries ago. From Wikipedia:
 
-> Sutton is an English-language surname of England and Ireland. One origin is from Anglo-Saxon where it is derived from sudh, suth, or suð, and tun referring to the generic placename "Southtown".
+> Sutton is an English-language surname of England and Ireland. One origin is from Anglo-Saxon where it is derived from sudh, suth, or suÃ°, and tun referring to the generic placename "Southtown".
 
 We can also see from the results that Kingston, Preston, Weston, Broughton and Middleton may also share a degree of variation according to their specific locations in the UK.
 
@@ -796,7 +795,7 @@ dplyr::filter(ukCounts, EastWestFlag == "West" & Freq > 10)[1:10,]
 ## 10         Suffolk         West   25
 ```
 
-## 4. Power BI {.tabset .tabset-fade .tabset-pills}
+## 4. Power BI
 ### a. Importing R code
 
 One of the benefits of using more recent versions of Power BI is being able to use the R integration tools available to you. For example, I can create datasets within a report by simply copying and pasting the R (and SQL) queries we've written so far.
@@ -848,7 +847,7 @@ I have attached a Power BI file with Power BI reports attached. **You will need 
 
 ![A preview of a Power BI report.](images/eg_dashboard.png)
 
-## 5. Conclusions and notes. {.tabset .tabset-fade .tabset-pills}
+## 5. Conclusions and notes.
 ### a. Conclusion 
 **That the hypothesis is true** - there are indeed more places with UK names on the East Coast than there are on the West Coast.
 
@@ -861,7 +860,7 @@ Given a longer time frame to work in, there are a few extra hypotheses I would h
 - **Fuzzy matching** It would be interesting to introduce Levenshtein distances into future analyses to try and match on similar sounding names to provide a workaround for name variations (such as Sutton-on-the-Hill and Sutton-on-Hull)
 - **Compensating for the multiple longitude/latitude values** I would have liked to have incorporated a function from a Stack Overflow question I answered a while ago, which aggregates long/lat values taking into account the curviture of the Earth. Alas, the code is below::
 
-## 6. References {.tabset .tabset-fade .tabset-pills}
+## 6. References
 
 Main dataset: <http://download.maxmind.com/download/worldcities/worldcitiespop.txt.gz>
 
